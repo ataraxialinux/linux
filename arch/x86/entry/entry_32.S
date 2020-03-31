@@ -1085,6 +1085,11 @@ SYM_FUNC_START(entry_INT80_32)
 	call	do_int80_syscall_32
 .Lsyscall_32_done:
 
+#ifdef CONFIG_PAX_RANDKSTACK
+	movl	%esp, %eax
+	call pax_randomize_kstack
+#endif
+
 	STACKLEAK_ERASE
 
 restore_all:

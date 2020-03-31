@@ -41,6 +41,7 @@
 #include <linux/sched/cputime.h>
 #include <linux/cred.h>
 #include <linux/dax.h>
+#include <linux/xattr.h>
 #include <linux/uaccess.h>
 #include <asm/param.h>
 #include <asm/page.h>
@@ -73,6 +74,10 @@ static int load_elf_library(struct file *);
 static int elf_core_dump(struct coredump_params *cprm);
 #else
 #define elf_core_dump	NULL
+#endif
+
+#ifdef CONFIG_PAX_MPROTECT
+static void elf_handle_mprotect(struct vm_area_struct *vma, unsigned long newflags);
 #endif
 
 #if ELF_EXEC_PAGESIZE > PAGE_SIZE
@@ -852,6 +857,18 @@ out_free_interp:
 	/* Do this immediately, since STACK_TOP as used in setup_arg_pages
 	   may depend on the personality.  */
 	SET_PERSONALITY2(*elf_ex, &arch_state);
+#if defined(CONFIG_PAX)
+	current->mm->pax_flags = 0UL;
+#if defined(CONFIG_PAX_NOWRITEEXEC)
+	if (executable_stack == EXSTACK_ENABLE_X)
+	{
+#if defined(CONFIG_PAX_EMUTRAMP)
+		executable_stack = EXSTACK_DISABLE_X;
+		current->mm->pax_flags |= MF_PAX_EMUTRAMP;
+#endif
+	}
+#endif
+#endif
 	if (elf_read_implies_exec(*elf_ex, executable_stack))
 		current->personality |= READ_IMPLIES_EXEC;
 
@@ -2380,6 +2397,56 @@ cleanup:
 }
 
 #endif		/* CONFIG_ELF_CORE */
+
+#ifdef CONFIG_PAX_MPROTECT
+/* PaX: non-PIC ELF libraries need relocations on their executable segments
+ * therefore we'll grant them VM_MAYWRITE once during their life. Similarly
+ * we'll remove VM_MAYWRITE for good on RELRO segments.
+ *
+ * The checks favour ld-linux.so behaviour which operates on a per ELF segment
+ * basis because we want to allow the common case and not the special ones.
+ */
+static void elf_handle_mprotect(struct vm_area_struct *vma, unsigned long newflags)
+{
+	struct elfhdr elf_h;
+	struct elf_phdr elf_p;
+	unsigned long i;
+	unsigned long oldflags;
+	bool is_relro;
+
+	if (!vma->vm_file)
+		return;
+
+	oldflags = vma->vm_flags & (VM_MAYEXEC | VM_MAYWRITE | VM_MAYREAD | VM_EXEC | VM_WRITE | VM_READ);
+	newflags &= VM_MAYEXEC | VM_MAYWRITE | VM_MAYREAD | VM_EXEC | VM_WRITE | VM_READ;
+
+	/* possible RELRO */
+	is_relro = vma->anon_vma && oldflags == (VM_MAYWRITE | VM_MAYREAD | VM_READ) && newflags == (VM_MAYWRITE | VM_MAYREAD | VM_READ);
+
+	if (!is_relro)
+		return;
+
+	if (sizeof(elf_h) != kernel_read(vma->vm_file, 0UL, (char *)&elf_h, sizeof(elf_h)) ||
+	    memcmp(elf_h.e_ident, ELFMAG, SELFMAG) ||
+	    (elf_h.e_type != ET_DYN && elf_h.e_type != ET_EXEC) ||
+	    !elf_check_arch(&elf_h) ||
+	    elf_h.e_phentsize != sizeof(struct elf_phdr) ||
+	    elf_h.e_phnum > 65536UL / sizeof(struct elf_phdr))
+		return;
+
+	for (i = 0UL; i < elf_h.e_phnum; i++) {
+		if (sizeof(elf_p) != kernel_read(vma->vm_file, elf_h.e_phoff + i*sizeof(elf_p), (char *)&elf_p, sizeof(elf_p)))
+			return;
+		if (elf_p.p_type == PT_GNU_RELRO) {
+			if (!is_relro)
+				continue;
+			if ((elf_p.p_offset >> PAGE_SHIFT) == vma->vm_pgoff && ELF_PAGEALIGN(elf_p.p_memsz) == vma->vm_end - vma->vm_start)
+				vma->vm_flags &= ~VM_MAYWRITE;
+			is_relro = false;
+		}
+	}
+}
+#endif
 
 static int __init init_elf_binfmt(void)
 {

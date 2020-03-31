@@ -529,6 +529,9 @@ struct mm_struct {
 		atomic_long_t hugetlb_usage;
 #endif
 		struct work_struct async_put_work;
+#if defined(CONFIG_PAX)
+		unsigned long pax_flags;
+#endif
 	} __randomize_layout;
 
 	/*

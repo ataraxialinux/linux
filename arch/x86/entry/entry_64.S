@@ -53,6 +53,15 @@ SYM_CODE_START(native_usergs_sysret64)
 SYM_CODE_END(native_usergs_sysret64)
 #endif /* CONFIG_PARAVIRT */
 
+#ifdef CONFIG_PAX_RANDKSTACK
+.macro PAX_RAND_KSTACK
+	movq	%rsp, %rdi
+	call	pax_randomize_kstack
+	movq    %rsp, %rdi
+	movq    %rax, %rsp
+.endm
+#endif
+
 .macro TRACE_IRQS_FLAGS flags:req
 #ifdef CONFIG_TRACE_IRQFLAGS
 	btl	$9, \flags		/* interrupts off? */
@@ -170,9 +179,28 @@ SYM_INNER_LABEL(entry_SYSCALL_64_after_hwframe, SYM_L_GLOBAL)
 	TRACE_IRQS_OFF
 
 	/* IRQs are off. */
+
+	/*
+	 * do_syscall_64 expects syscall-nr (pt_regs->orig_ax) as the first
+	 * argument (%rdi) and pointer to pt_regs as the second argument (%rsi).
+	 */
+#ifdef CONFIG_PAX_RANDKSTACK
+	pushq	%rax
+	movq	%rsp, %rdi
+	call	pax_randomize_kstack
+	popq	%rdi
+	movq    %rsp, %rsi
+	movq    %rax, %rsp
+
+	pushq	%rsi
+#else
 	movq	%rax, %rdi
 	movq	%rsp, %rsi
+#endif
 	call	do_syscall_64		/* returns with IRQs disabled */
+#ifdef CONFIG_PAX_RANDKSTACK
+	popq	%rsp
+#endif
 
 	TRACE_IRQS_IRETQ		/* we're about to change IF */
 
@@ -340,8 +368,17 @@ SYM_CODE_START(ret_from_fork)
 
 2:
 	UNWIND_HINT_REGS
+#ifdef CONFIG_PAX_RANDKSTACK
+	PAX_RAND_KSTACK
+	pushq	%rdi
+#else
 	movq	%rsp, %rdi
+#endif
 	call	syscall_return_slowpath	/* returns with IRQs disabled */
+#ifdef CONFIG_PAX_RANDKSTACK
+	popq	%rsp
+#endif
+
 	TRACE_IRQS_ON			/* user mode is traced as IRQS on */
 	jmp	swapgs_restore_regs_and_return_to_usermode
 

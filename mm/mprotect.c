@@ -26,6 +26,10 @@
 #include <linux/perf_event.h>
 #include <linux/pkeys.h>
 #include <linux/ksm.h>
+#ifdef CONFIG_PAX_MPROTECT
+#include <linux/elf.h>
+#include <linux/binfmts.h>
+#endif
 #include <linux/uaccess.h>
 #include <linux/mm_inline.h>
 #include <asm/pgtable.h>
@@ -455,6 +459,10 @@ success:
 	 * held in write mode.
 	 */
 	vma->vm_flags = newflags;
+#ifdef CONFIG_PAX_MPROTECT
+	if (mm->binfmt && mm->binfmt->handle_mprotect)
+		mm->binfmt->handle_mprotect(vma, newflags);
+#endif
 	dirty_accountable = vma_wants_writenotify(vma, vma->vm_page_prot);
 	vma_set_page_prot(vma);
 
@@ -547,6 +555,11 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 	}
 	if (start > vma->vm_start)
 		prev = vma;
+
+#ifdef CONFIG_PAX_MPROTECT
+	if (current->mm->binfmt && current->mm->binfmt->handle_mprotect)
+		current->mm->binfmt->handle_mprotect(vma, calc_vm_prot_bits(prot, 0));
+#endif
 
 	for (nstart = start ; ; ) {
 		unsigned long mask_off_old_flags;

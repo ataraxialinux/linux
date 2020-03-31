@@ -1468,6 +1468,9 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg,
 		f_flags = O_RDWR;
 	}
 	if (shmflg & SHM_EXEC) {
+#ifdef CONFIG_PAX_NOWRITEEXEC
+		goto out;
+#endif
 		prot |= PROT_EXEC;
 		acc_mode |= S_IXUGO;
 	}

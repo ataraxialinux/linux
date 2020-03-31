@@ -1431,6 +1431,17 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	vm_flags |= calc_vm_prot_bits(prot, pkey) | calc_vm_flag_bits(flags) |
 			mm->def_flags | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC;
 
+#ifdef CONFIG_PAX_NOWRITEEXEC
+	if ((vm_flags & (VM_WRITE | VM_EXEC)) == (VM_WRITE | VM_EXEC))
+		return -EPERM;
+#ifdef CONFIG_PAX_MPROTECT
+	if (!(vm_flags & VM_EXEC))
+		vm_flags &= ~VM_MAYEXEC;
+	else
+		vm_flags &= ~VM_MAYWRITE;
+#endif
+#endif
+
 	if (flags & MAP_LOCKED)
 		if (!can_do_mlock())
 			return -EPERM;
@@ -2976,6 +2987,9 @@ static int do_brk_flags(unsigned long addr, unsigned long len, unsigned long fla
 	if ((flags & (~VM_EXEC)) != 0)
 		return -EINVAL;
 	flags |= VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
+#ifdef CONFIG_PAX_MPROTECT
+	flags &= ~VM_MAYEXEC;
+#endif
 
 	mapped_addr = get_unmapped_area(NULL, addr, len, 0, MAP_FIXED);
 	if (IS_ERR_VALUE(mapped_addr))
@@ -3382,6 +3396,17 @@ static struct vm_area_struct *__install_special_mapping(
 
 	vma->vm_start = addr;
 	vma->vm_end = addr + len;
+
+#ifdef CONFIG_PAX_NOWRITEEXEC
+	if ((vm_flags & (VM_WRITE | VM_EXEC)) == (VM_WRITE | VM_EXEC))
+		return ERR_PTR(-EPERM);
+#ifdef CONFIG_PAX_MPROTECT
+	if (!(vm_flags & VM_EXEC))
+		vm_flags &= ~VM_MAYEXEC;
+	else
+		vm_flags &= ~VM_MAYWRITE;
+#endif
+#endif
 
 	vma->vm_flags = vm_flags | mm->def_flags | VM_DONTEXPAND | VM_SOFTDIRTY;
 	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);

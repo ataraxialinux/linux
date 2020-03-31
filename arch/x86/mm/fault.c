@@ -143,6 +143,11 @@ is_prefetch(struct pt_regs *regs, unsigned long error_code, unsigned long addr)
 	return prefetch;
 }
 
+#ifdef CONFIG_PAX_EMUTRAMP
+static bool pax_is_fetch_fault(struct pt_regs *regs, unsigned long error_code, unsigned long address);
+static int pax_handle_fetch_fault(struct pt_regs *regs);
+#endif
+
 DEFINE_SPINLOCK(pgd_lock);
 LIST_HEAD(pgd_list);
 
@@ -908,6 +913,14 @@ __bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 		if (is_errata100(regs, address))
 			return;
 
+#ifdef CONFIG_PAX_EMUTRAMP
+		if (pax_is_fetch_fault(regs, error_code, address)) {
+			if (pax_handle_fetch_fault(regs) == 2)
+				return;
+			do_group_exit(SIGKILL);
+		}
+#endif
+
 		/*
 		 * To avoid leaking information about the kernel page table
 		 * layout, pretend that user-mode accesses to kernel addresses
@@ -1539,3 +1552,209 @@ do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
 		do_user_addr_fault(regs, hw_error_code, address);
 }
 NOKPROBE_SYMBOL(do_page_fault);
+
+#ifdef CONFIG_PAX_EMUTRAMP
+static bool pax_is_fetch_fault(struct pt_regs *regs, unsigned long error_code, unsigned long address)
+{
+	unsigned long ip = regs->ip;
+
+	if (v8086_mode(regs))
+		ip = ((regs->cs & 0xffff) << 4) + (ip & 0xffff);
+
+	if ((__supported_pte_mask & _PAGE_NX) && (error_code & PF_INSTR))
+		return true;
+	if (!(error_code & (PF_PROT | PF_WRITE)) && ip == address)
+		return true;
+	return false;
+}
+
+static int pax_handle_fetch_fault_32(struct pt_regs *regs)
+{
+	int err;
+
+	do { /* PaX: libffi trampoline emulation */
+		unsigned char mov, jmp;
+		unsigned int addr1, addr2;
+
+#ifdef CONFIG_X86_64
+		if ((regs->ip + 9) >> 32)
+			break;
+#endif
+
+		err = get_user(mov, (unsigned char __user *)regs->ip);
+		err |= get_user(addr1, (unsigned int __user *)(regs->ip + 1));
+		err |= get_user(jmp, (unsigned char __user *)(regs->ip + 5));
+		err |= get_user(addr2, (unsigned int __user *)(regs->ip + 6));
+
+		if (err)
+			break;
+
+		if (mov == 0xB8 && jmp == 0xE9) {
+			regs->ax = addr1;
+			regs->ip = (unsigned int)(regs->ip + addr2 + 10);
+			return 2;
+		}
+	} while (0);
+
+	do { /* PaX: gcc trampoline emulation #1 */
+		unsigned char mov1, mov2;
+		unsigned short jmp;
+		unsigned int addr1, addr2;
+
+#ifdef CONFIG_X86_64
+		if ((regs->ip + 11) >> 32)
+			break;
+#endif
+
+		err = get_user(mov1, (unsigned char __user *)regs->ip);
+		err |= get_user(addr1, (unsigned int __user *)(regs->ip + 1));
+		err |= get_user(mov2, (unsigned char __user *)(regs->ip + 5));
+		err |= get_user(addr2, (unsigned int __user *)(regs->ip + 6));
+		err |= get_user(jmp, (unsigned short __user *)(regs->ip + 10));
+
+		if (err)
+			break;
+
+		if (mov1 == 0xB9 && mov2 == 0xB8 && jmp == 0xE0FF) {
+			regs->cx = addr1;
+			regs->ax = addr2;
+			regs->ip = addr2;
+			return 2;
+		}
+	} while (0);
+
+	do { /* PaX: gcc trampoline emulation #2 */
+		unsigned char mov, jmp;
+		unsigned int addr1, addr2;
+
+#ifdef CONFIG_X86_64
+		if ((regs->ip + 9) >> 32)
+			break;
+#endif
+
+		err = get_user(mov, (unsigned char __user *)regs->ip);
+		err |= get_user(addr1, (unsigned int __user *)(regs->ip + 1));
+		err |= get_user(jmp, (unsigned char __user *)(regs->ip + 5));
+		err |= get_user(addr2, (unsigned int __user *)(regs->ip + 6));
+
+		if (err)
+			break;
+
+		if (mov == 0xB9 && jmp == 0xE9) {
+			regs->cx = addr1;
+			regs->ip = (unsigned int)(regs->ip + addr2 + 10);
+			return 2;
+		}
+	} while (0);
+
+	return 1; /* PaX in action */
+}
+
+#ifdef CONFIG_X86_64
+static int pax_handle_fetch_fault_64(struct pt_regs *regs)
+{
+	int err;
+
+	do { /* PaX: libffi trampoline emulation */
+		unsigned short mov1, mov2, jmp1;
+		unsigned char stcclc, jmp2;
+		unsigned long addr1, addr2;
+
+		err = get_user(mov1, (unsigned short __user *)regs->ip);
+		err |= get_user(addr1, (unsigned long __user *)(regs->ip + 2));
+		err |= get_user(mov2, (unsigned short __user *)(regs->ip + 10));
+		err |= get_user(addr2, (unsigned long __user *)(regs->ip + 12));
+		err |= get_user(stcclc, (unsigned char __user *)(regs->ip + 20));
+		err |= get_user(jmp1, (unsigned short __user *)(regs->ip + 21));
+		err |= get_user(jmp2, (unsigned char __user *)(regs->ip + 23));
+
+		if (err)
+			break;
+
+		if (mov1 == 0xBB49 && mov2 == 0xBA49 && (stcclc == 0xF8 || stcclc == 0xF9) && jmp1 == 0xFF49 && jmp2 == 0xE3) {
+			regs->r11 = addr1;
+			regs->r10 = addr2;
+			if (stcclc == 0xF8)
+				regs->flags &= ~X86_EFLAGS_CF;
+			else
+				regs->flags |= X86_EFLAGS_CF;
+			regs->ip = addr1;
+			return 2;
+		}
+	} while (0);
+
+	do { /* PaX: gcc trampoline emulation #1 */
+		unsigned short mov1, mov2, jmp1;
+		unsigned char jmp2;
+		unsigned int addr1;
+		unsigned long addr2;
+
+		err = get_user(mov1, (unsigned short __user *)regs->ip);
+		err |= get_user(addr1, (unsigned int __user *)(regs->ip + 2));
+		err |= get_user(mov2, (unsigned short __user *)(regs->ip + 6));
+		err |= get_user(addr2, (unsigned long __user *)(regs->ip + 8));
+		err |= get_user(jmp1, (unsigned short __user *)(regs->ip + 16));
+		err |= get_user(jmp2, (unsigned char __user *)(regs->ip + 18));
+
+		if (err)
+			break;
+
+		if (mov1 == 0xBB41 && mov2 == 0xBA49 && jmp1 == 0xFF49 && jmp2 == 0xE3) {
+			regs->r11 = addr1;
+			regs->r10 = addr2;
+			regs->ip = addr1;
+			return 2;
+		}
+	} while (0);
+
+	do { /* PaX: gcc trampoline emulation #2 */
+		unsigned short mov1, mov2, jmp1;
+		unsigned char jmp2;
+		unsigned long addr1, addr2;
+
+		err = get_user(mov1, (unsigned short __user *)regs->ip);
+		err |= get_user(addr1, (unsigned long __user *)(regs->ip + 2));
+		err |= get_user(mov2, (unsigned short __user *)(regs->ip + 10));
+		err |= get_user(addr2, (unsigned long __user *)(regs->ip + 12));
+		err |= get_user(jmp1, (unsigned short __user *)(regs->ip + 20));
+		err |= get_user(jmp2, (unsigned char __user *)(regs->ip + 22));
+
+		if (err)
+			break;
+
+		if (mov1 == 0xBB49 && mov2 == 0xBA49 && jmp1 == 0xFF49 && jmp2 == 0xE3) {
+			regs->r11 = addr1;
+			regs->r10 = addr2;
+			regs->ip = addr1;
+			return 2;
+		}
+	} while (0);
+
+	return 1; /* PaX in action */
+}
+#endif
+
+/*
+ * PaX: decide what to do with offenders (regs->ip = fault address)
+ *
+ * returns 1 when task should be killed
+ *         2 when gcc trampoline was detected
+ */
+static int pax_handle_fetch_fault(struct pt_regs *regs)
+{
+	if (v8086_mode(regs))
+		return 1;
+
+	if (!(current->mm->pax_flags & MF_PAX_EMUTRAMP))
+		return 1;
+
+#ifdef CONFIG_X86_32
+	return pax_handle_fetch_fault_32(regs);
+#else
+	if (regs->cs == __USER32_CS || (regs->cs & SEGMENT_LDT))
+		return pax_handle_fetch_fault_32(regs);
+	else
+		return pax_handle_fetch_fault_64(regs);
+#endif
+}
+#endif

@@ -99,6 +99,9 @@ struct linux_binfmt {
 	int (*load_binary)(struct linux_binprm *);
 	int (*load_shlib)(struct file *);
 	int (*core_dump)(struct coredump_params *cprm);
+#ifdef CONFIG_PAX_MPROTECT
+	void (*handle_mprotect)(struct vm_area_struct *vma, unsigned long newflags);
+#endif
 	unsigned long min_coredump;	/* minimal dump size */
 } __randomize_layout;
 

@@ -1040,6 +1040,10 @@ inline int build_open_flags(const struct open_how *how, struct open_flags *op)
 	if (flags & O_APPEND)
 		acc_mode |= MAY_APPEND;
 
+	/* Check exec permissions on open() */
+	if (flags & O_MAYEXEC)
+		acc_mode |= MAY_OPENEXEC;
+
 	op->acc_mode = acc_mode;
 
 	op->intent = flags & O_PATH ? 0 : LOOKUP_OPEN;

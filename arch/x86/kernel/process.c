@@ -990,3 +990,27 @@ long do_arch_prctl_common(struct task_struct *task, int option,
 
 	return -EINVAL;
 }
+
+#ifdef CONFIG_PAX_RANDKSTACK
+unsigned long pax_randomize_kstack(struct pt_regs *regs)
+{
+	unsigned long time;
+	unsigned long sp1;
+
+	if (!randomize_va_space)
+		return (unsigned long)regs;
+
+	/* P4 seems to return a 0 LSB, ignore it */
+#ifdef CONFIG_MPENTIUM4
+	time = rdtsc() & 0x3EUL;
+	sp1 = (unsigned long)regs - (time << 2);
+#elif defined(CONFIG_X86_64)
+	time = rdtsc() & 0xFUL;
+	sp1 = (unsigned long)regs - (time << 4);
+#else
+	time = rdtsc() & 0x1FUL;
+	sp1 = (unsigned long)regs - (time << 3);
+#endif
+	return sp1;
+}
+#endif

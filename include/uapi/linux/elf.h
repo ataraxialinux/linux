@@ -38,6 +38,7 @@ typedef __s64	Elf64_Sxword;
 #define PT_GNU_EH_FRAME		0x6474e550
 
 #define PT_GNU_STACK	(PT_LOOS + 0x474e551)
+#define PT_GNU_RELRO	(PT_LOOS + 0x474e552)
 
 /*
  * Extended Numbering
@@ -95,6 +96,8 @@ typedef __s64	Elf64_Sxword;
 #define DT_DEBUG	21
 #define DT_TEXTREL	22
 #define DT_JMPREL	23
+#define DT_FLAGS	30
+  #define DF_TEXTREL  0x00000004
 #define DT_ENCODING	32
 #define OLD_DT_LOOS	0x60000000
 #define DT_LOOS		0x6000000d
