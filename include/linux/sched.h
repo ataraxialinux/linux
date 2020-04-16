@@ -1871,7 +1871,14 @@ extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 #define TASK_SIZE_OF(tsk)	TASK_SIZE
 #endif
 
+#define MF_PAX_PAGEEXEC		0x01000000	/* Paging based non-executable pages */
 #define MF_PAX_EMUTRAMP		0x02000000	/* Emulate trampolines */
+#define MF_PAX_MPROTECT		0x04000000	/* Restrict mprotect() */
+#define MF_PAX_RANDMMAP		0x08000000	/* Randomize mmap() base */
+/*#define MF_PAX_RANDEXEC		0x10000000*/	/* Randomize ET_EXEC base */
+#define MF_PAX_SEGMEXEC		0x20000000	/* Segmentation based non-executable pages */
+
+#define PAX_PARSE_FLAGS_FALLBACK	(~0UL)
 
 #ifdef CONFIG_RSEQ
 

@@ -191,4 +191,9 @@ static inline u32 next_pseudo_random32(u32 seed)
 	return seed * 1664525 + 1013904223;
 }
 
+static inline unsigned long pax_get_random_long(void)
+{
+	return prandom_u32() + (sizeof(long) > 4 ? (unsigned long)prandom_u32() << 32 : 0);
+}
+
 #endif /* _LINUX_RANDOM_H */

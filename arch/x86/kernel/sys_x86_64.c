@@ -144,6 +144,10 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	if (len > end)
 		return -ENOMEM;
 
+#ifdef CONFIG_PAX_RANDMMAP
+	if (!(mm->pax_flags & MF_PAX_RANDMMAP))
+#endif
+
 	if (addr) {
 		addr = PAGE_ALIGN(addr);
 		vma = find_vma(mm, addr);
@@ -186,6 +190,10 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	/* for MAP_32BIT mappings we force the legacy mmap base */
 	if (!in_32bit_syscall() && (flags & MAP_32BIT))
 		goto bottomup;
+
+#ifdef CONFIG_PAX_RANDMMAP
+	if (!(mm->pax_flags & MF_PAX_RANDMMAP))
+#endif
 
 	/* requesting a specific address */
 	if (addr) {

@@ -531,6 +531,10 @@ struct mm_struct {
 		struct work_struct async_put_work;
 #if defined(CONFIG_PAX)
 		unsigned long pax_flags;
+#ifdef CONFIG_PAX_ASLR
+		unsigned long delta_mmap;		/* randomized offset */
+		unsigned long delta_stack;		/* randomized offset */
+#endif
 #endif
 	} __randomize_layout;
 

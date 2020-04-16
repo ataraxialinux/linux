@@ -62,6 +62,7 @@
 #include <linux/oom.h>
 #include <linux/compat.h>
 #include <linux/vmalloc.h>
+#include <linux/random.h>
 
 #include <linux/uaccess.h>
 #include <asm/mmu_context.h>
@@ -274,6 +275,12 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 	mm->stack_vm = mm->total_vm = 1;
 	up_write(&mm->mmap_sem);
 	bprm->p = vma->vm_end - sizeof(void *);
+
+#ifdef CONFIG_PAX_RANDUSTACK
+	if (randomize_va_space)
+		bprm->p ^= prandom_u32() & ~PAGE_MASK;
+#endif
+
 	return 0;
 err:
 	up_write(&mm->mmap_sem);
@@ -800,6 +807,27 @@ int setup_arg_pages(struct linux_binprm *bprm,
 #endif
 	current->mm->start_stack = bprm->p;
 	ret = expand_stack(vma, stack_base);
+
+#if !defined(CONFIG_STACK_GROWSUP) && defined(CONFIG_PAX_RANDMMAP)
+	if (!ret && (mm->pax_flags & MF_PAX_RANDMMAP) && STACK_TOP <= 0xFFFFFFFFU && STACK_TOP > vma->vm_end) {
+		unsigned long size;
+		vm_flags_t vm_flags;
+
+		size = STACK_TOP - vma->vm_end;
+		vm_flags = VM_NONE | VM_DONTEXPAND | VM_DONTDUMP;
+
+		ret = vma->vm_end != mmap_region(NULL, vma->vm_end, size, vm_flags, 0, NULL);
+
+#ifdef CONFIG_X86
+		if (!ret) {
+			size = PAGE_SIZE + mmap_min_addr + ((mm->delta_mmap ^ mm->delta_stack) & (0xFFUL << PAGE_SHIFT));
+			ret = 0 != mmap_region(NULL, 0, PAGE_ALIGN(size), vm_flags, 0, NULL);
+		}
+#endif
+
+	}
+#endif
+
 	if (ret)
 		ret = -EFAULT;
 

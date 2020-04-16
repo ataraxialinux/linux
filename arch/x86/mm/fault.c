@@ -1561,9 +1561,9 @@ static bool pax_is_fetch_fault(struct pt_regs *regs, unsigned long error_code, u
 	if (v8086_mode(regs))
 		ip = ((regs->cs & 0xffff) << 4) + (ip & 0xffff);
 
-	if ((__supported_pte_mask & _PAGE_NX) && (error_code & PF_INSTR))
+	if ((__supported_pte_mask & _PAGE_NX) && (error_code & X86_PF_INSTR))
 		return true;
-	if (!(error_code & (PF_PROT | PF_WRITE)) && ip == address)
+	if (!(error_code & (X86_PF_PROT | X86_PF_WRITE)) && ip == address)
 		return true;
 	return false;
 }

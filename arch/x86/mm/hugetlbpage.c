@@ -132,6 +132,12 @@ static unsigned long hugetlb_get_unmapped_area_topdown(struct file *file,
 		VM_BUG_ON(addr != -ENOMEM);
 		info.flags = 0;
 		info.low_limit = TASK_UNMAPPED_BASE;
+
+#ifdef CONFIG_PAX_RANDMMAP
+		if (current->mm->pax_flags & MF_PAX_RANDMMAP)
+			info.low_limit += current->mm->delta_mmap;
+#endif
+
 		info.high_limit = TASK_SIZE_LOW;
 		addr = vm_unmapped_area(&info);
 	}
@@ -159,6 +165,10 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 			return -EINVAL;
 		return addr;
 	}
+
+#ifdef CONFIG_PAX_RANDMMAP
+	if (!(mm->pax_flags & MF_PAX_RANDMMAP))
+#endif
 
 	if (addr) {
 		addr &= huge_page_mask(h);

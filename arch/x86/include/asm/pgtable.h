@@ -1478,4 +1478,6 @@ static inline bool arch_faults_on_old_pte(void)
 #include <asm-generic/pgtable.h>
 #endif	/* __ASSEMBLY__ */
 
+#define TASK_SIZE_MAX_SHIFT CONFIG_TASK_SIZE_MAX_SHIFT
+
 #endif /* _ASM_X86_PGTABLE_H */

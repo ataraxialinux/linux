@@ -260,6 +260,20 @@ extern int force_personality32;
 
 #define ELF_HWCAP		(boot_cpu_data.x86_capability[CPUID_1_EDX])
 
+#ifdef CONFIG_PAX_ASLR
+#ifdef CONFIG_X86_32
+#define PAX_ELF_ET_DYN_BASE	0x10000000UL
+
+#define PAX_DELTA_MMAP_LEN	(current->mm->pax_flags & MF_PAX_SEGMEXEC ? 15 : 16)
+#define PAX_DELTA_STACK_LEN	(current->mm->pax_flags & MF_PAX_SEGMEXEC ? 15 : 16)
+#else
+#define PAX_ELF_ET_DYN_BASE	0x400000UL
+
+#define PAX_DELTA_MMAP_LEN	((test_thread_flag(TIF_ADDR32)) ? 16 : TASK_SIZE_MAX_SHIFT - PAGE_SHIFT - 3)
+#define PAX_DELTA_STACK_LEN	((test_thread_flag(TIF_ADDR32)) ? 16 : TASK_SIZE_MAX_SHIFT - PAGE_SHIFT - 3)
+#endif
+#endif
+
 extern u32 elf_hwcap2;
 
 /*

@@ -859,6 +859,10 @@ out_free_interp:
 	SET_PERSONALITY2(*elf_ex, &arch_state);
 #if defined(CONFIG_PAX)
 	current->mm->pax_flags = 0UL;
+#ifdef CONFIG_PAX_ASLR
+	current->mm->delta_mmap = 0UL;
+	current->mm->delta_stack = 0UL;
+#endif
 #if defined(CONFIG_PAX_NOWRITEEXEC)
 	if (executable_stack == EXSTACK_ENABLE_X)
 	{
@@ -866,6 +870,12 @@ out_free_interp:
 		executable_stack = EXSTACK_DISABLE_X;
 		current->mm->pax_flags |= MF_PAX_EMUTRAMP;
 #endif
+	}
+#endif
+#ifdef CONFIG_PAX_ASLR
+	if (current->mm->pax_flags & MF_PAX_RANDMMAP) {
+		current->mm->delta_mmap = (pax_get_random_long() & ((1UL << PAX_DELTA_MMAP_LEN)-1)) << PAGE_SHIFT;
+		current->mm->delta_stack = (pax_get_random_long() & ((1UL << PAX_DELTA_STACK_LEN)-1)) << PAGE_SHIFT;
 	}
 #endif
 #endif
@@ -990,6 +1000,15 @@ out_free_interp:
 			 */
 			load_bias = ELF_PAGESTART(load_bias - vaddr);
 
+#ifdef CONFIG_PAX_RANDMMAP
+			/* PaX: randomize base address at the default exe base if requested */
+			if ((current->mm->pax_flags & MF_PAX_RANDMMAP) && interpreter) {
+				load_bias = (pax_get_random_long() & ((1UL << PAX_DELTA_MMAP_LEN) - 1)) << PAGE_SHIFT;
+				load_bias = ELF_PAGESTART(PAX_ELF_ET_DYN_BASE - vaddr + load_bias);
+				elf_flags |= MAP_FIXED;
+			}
+#endif
+
 			total_size = total_mapping_size(elf_phdata,
 							elf_ex->e_phnum);
 			if (!total_size) {
@@ -1071,6 +1090,33 @@ out_free_interp:
 		goto out_free_dentry;
 	}
 
+#ifdef CONFIG_PAX_RANDMMAP
+	if (current->mm->pax_flags & MF_PAX_RANDMMAP) {
+		unsigned long start, size, flags;
+		vm_flags_t vm_flags;
+
+		start = ELF_PAGEALIGN(elf_brk);
+		size = PAGE_SIZE + ((pax_get_random_long() & ((1UL << 22) - 1UL)) << 4);
+		flags = MAP_FIXED | MAP_PRIVATE;
+		vm_flags = VM_DONTEXPAND | VM_DONTDUMP;
+
+		down_write(&current->mm->mmap_sem);
+		start = get_unmapped_area(NULL, start, PAGE_ALIGN(size), 0, flags);
+		retval = -ENOMEM;
+		if (!IS_ERR_VALUE(start) && !find_vma_intersection(current->mm, start, start + size + PAGE_SIZE)) {
+//			if (current->personality & ADDR_NO_RANDOMIZE)
+//				vm_flags |= VM_READ | VM_MAYREAD;
+			start = mmap_region(NULL, start, PAGE_ALIGN(size), vm_flags, 0, NULL);
+			retval = IS_ERR_VALUE(start) ? start : 0;
+		}
+		up_write(&current->mm->mmap_sem);
+		if (retval == 0)
+			retval = set_brk(start + size, start + size + PAGE_SIZE, 0);
+		if (retval < 0)
+			goto out_free_dentry;
+	}
+#endif
+
 	if (interpreter) {
 		elf_entry = load_elf_interp(&loc->interp_elf_ex,
 					    interpreter,
@@ -1123,6 +1169,7 @@ out_free_interp:
 	mm->end_data = end_data;
 	mm->start_stack = bprm->p;
 
+#ifndef CONFIG_PAX_RANDMMAP
 	if ((current->flags & PF_RANDOMIZE) && (randomize_va_space > 1)) {
 		/*
 		 * For architectures with ELF randomization, when executing
@@ -1141,6 +1188,7 @@ out_free_interp:
 		current->brk_randomized = 1;
 #endif
 	}
+#endif
 
 	if (current->personality & MMAP_PAGE_ZERO) {
 		/* Why this, you ask???  Well SVr4 maps page 0 as read-only,

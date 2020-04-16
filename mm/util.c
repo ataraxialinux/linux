@@ -318,6 +318,11 @@ unsigned long randomize_stack_top(unsigned long stack_top)
 {
 	unsigned long random_variable = 0;
 
+#ifdef CONFIG_PAX_RANDUSTACK
+	if (current->mm->pax_flags & MF_PAX_RANDMMAP)
+		return stack_top - current->mm->delta_stack;
+#endif
+
 	if (current->flags & PF_RANDOMIZE) {
 		random_variable = get_random_long();
 		random_variable &= STACK_RND_MASK;
@@ -412,6 +417,12 @@ void arch_pick_mmap_layout(struct mm_struct *mm, struct rlimit *rlim_stack)
 void arch_pick_mmap_layout(struct mm_struct *mm, struct rlimit *rlim_stack)
 {
 	mm->mmap_base = TASK_UNMAPPED_BASE;
+
+#ifdef CONFIG_PAX_RANDMMAP
+	if (mm->pax_flags & MF_PAX_RANDMMAP)
+		mm->mmap_base += mm->delta_mmap;
+#endif
+
 	mm->get_unmapped_area = arch_get_unmapped_area;
 }
 #endif
